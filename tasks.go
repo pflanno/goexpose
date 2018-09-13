@@ -21,6 +21,8 @@ import (
 	"github.com/gocql/gocql"
 	"github.com/jmoiron/sqlx"
 	"github.com/lib/pq"
+	"github.com/golang/glog"
+	"github.com/google/shlex"
 )
 
 func init() {
@@ -43,6 +45,7 @@ type ShellTaskConfig struct {
 	// Custom environment variables
 	Env               map[string]string         `json:"env"`
 	Shell             string                    `json:"shell"`
+	ShellCmdOption    string                    `json:"shell_cmd_option"`
 	Commands          []*ShellTaskConfigCommand `json:"commands"`
 	SingleResult      *int                      `json:"single_result"`
 	singleResultIndex int                       `json:"-"`
@@ -88,6 +91,7 @@ func (s *ShellTaskConfigCommand) Validate() (err error) {
 func NewShellTaskConfig() *ShellTaskConfig {
 	return &ShellTaskConfig{
 		Shell: "/bin/sh",
+		ShellCmdOption: "-c",
 		Env:   map[string]string{},
 	}
 }
@@ -150,14 +154,23 @@ func (s *ShellTask) Run(r *http.Request, data map[string]interface{}) (response 
 
 		finalCommand = b
 
+		if s.Config.ShellCmdOption != "" {
+			finalCommand = s.Config.ShellCmdOption + " " + finalCommand
+		}
+
 		// show command in result
 		if command.ReturnCommand {
-			cmdresp.AddValue("command", finalCommand)
+			cmdresp.AddValue("command", s.Config.Shell + " " + finalCommand)
 		}
 
 		// run command
-		cmd = exec.Command(s.Config.Shell, "-c", finalCommand)
-
+		// -c is default option for shell commmand
+		{
+			tokens, _ := shlex.Split(finalCommand)
+			glog.Info(fmt.Sprintf("tokens: %#vs", tokens))
+			cmd = exec.Command(s.Config.Shell, tokens...)
+			glog.Info(fmt.Sprintf("cmd: %s %s", s.Config.Shell, finalCommand))
+		}
 		// change directory if needed
 		if command.Chdir != "" {
 			cmd.Dir = command.Chdir
@@ -170,7 +183,13 @@ func (s *ShellTask) Run(r *http.Request, data map[string]interface{}) (response 
 
 		// get output
 		if out, err := cmd.Output(); err != nil {
-			cmdresp.Error(err)
+			glog.Errorf("cmd error: %v", err)
+			outstr := string(out)
+			if outstr != "" {
+				glog.Errorf("cmd out: %v", outstr)
+				err = fmt.Errorf("%v %v", err, outstr)
+			}
+			cmdresp.Error(err.Error())
 			goto Append
 		} else {
 			// format out

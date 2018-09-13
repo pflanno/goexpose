@@ -2,6 +2,7 @@ package goexpose
 
 import (
 	"fmt"
+	"encoding/json"
 	"net/http"
 
 	"time"
@@ -213,9 +214,14 @@ func (s *Server) Handle(task Tasker, authorizers Authorizers, ec *EndpointConfig
 
 		// read request body
 		var body = ""
+		var formdata interface{}
 		if r.Body != nil {
-			if b, err := ioutil.ReadAll(r.Body); err != nil {
+			b, err := ioutil.ReadAll(r.Body);
+			if err == nil {
+				json.Unmarshal(b, &formdata)
 				body = string(b)
+			} else {
+				glog.Errorf("Error reading http body: %v", err)
 			}
 		}
 
@@ -230,6 +236,7 @@ func (s *Server) Handle(task Tasker, authorizers Authorizers, ec *EndpointConfig
 			"request": map[string]interface{}{
 				"method": r.Method,
 				"body":   body,
+				"jsondata": formdata,
 			},
 		}
 
